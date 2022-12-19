@@ -666,6 +666,7 @@ dependencies = [
  "nom-bibtex",
  "pulldown-cmark",
  "pulldown-cmark-to-cmark",
+ "regex",
  "semver",
  "serde",
  "serde_json",
