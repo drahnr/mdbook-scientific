@@ -422,7 +422,7 @@ fn dollar_split_tags_iter<'a>(source: &'a str) -> impl Iterator<Item = SplitTagP
 
                 if v.len() & 0x1 != 0 {
                     let last = v.last().unwrap();
-                    eprintln!("Inserting $-sign at end of line $lineno$!");
+                    eprintln!("Inserting $-sign at end of line #{lineno}!");
                     v.push(SplitTagPosition {
                         lico: LiCo {
                             lineno,
@@ -529,11 +529,11 @@ fn iter_over_dollar_encompassed_blocks<'a>(
                 byte_range,
             };
 
-            dbg!(if replace {
+            if replace {
                 Tagged::Replace(content)
             } else {
                 Tagged::Keep(content)
-            })
+            }
         },
     );
     pre.into_iter().chain(iter)
@@ -546,74 +546,86 @@ pub fn replace_inline_blocks(
     renderer: SupportedRenderer,
     used_fragments: &mut Vec<PathBuf>,
 ) -> Result<String> {
-    unimplemented!("foo");
-    // let mut iter = dollar_split_tags_iter(source);
-    // iter_over_dollar_encompassed_blocks(iter)
-    //     .map(|x| {
-    //     let generated_out =
-    //     if elm.starts_with("ref:") {
-    //         let elms = elm.split(':').skip(1).collect::<Vec<&str>>();
+    let mut iter = dollar_split_tags_iter(source);
+    let s = iter_over_dollar_encompassed_blocks(source, iter)
+        .map(|tagged| {
+            let mut content = tagged.as_ref();
+            // let mut dollarless_range = content.byte_range.clone();
+            let regex = regex::Regex::new(r###"^\$+(.+)\$+"###).unwrap();
+            let dollarless = regex.replace_all(content.as_ref(), "");
+            let mut content = content.clone();
+            // a bit bonkers FIXME XXX incoherent datastructure
+            content.s = dollarless.as_ref();
 
-    //         // we expect a type and reference name
-    //         if elms.len() != 2 {
-    //             // if not just return as text again
-    //             return Ok(elm.to_string());
-    //         }
+            transform_as_needed(
+                &content,
+                fragment_path,
+                &references,
+                used_fragments,
+                renderer,
+            )
+        })
+        .collect::<Result<Vec<String>>>()?
+        .into_iter()
+        .join("\n");
+    Ok(s)
+}
 
-    //         match &elms[..] {
-    //         ["fig", refere] => references
-    //             .get::<str>(refere)
-    //             .ok_or(Error::InvalidReference{
-    //                 to: elms[1].to_owned(), lineno
-    //             })
-    //             .map(|x| {
-    //                 format!(r#"<a class="fig_ref" href='#{}'>{}</a>"#, elms[1], x)
-    //             }),
-    //         ["bib", refere] => references
-    //             .get::<str>(refere)
-    //             .ok_or(Error::InvalidReference{
-    //                 to: elms[1].to_owned(), lineno
-    //             })
-    //             .map(|x| {
-    //                 format!(
-    //                     r#"<a class="bib_ref" href='bibliography.html#{}'>{}</a>"#,
-    //                     elms[1], x
-    //                 )
-    //             }),
-    //         ["equ", refere] => references
-    //             .get::<str>(refere)
-    //             .ok_or(Error::InvalidReference{
-    //                 to: elms[1].to_owned(), lineno
-    //             })
-    //             .map(|x| {
-    //                 format!(
-    //                     r#"<a class="equ_ref" href='#{}'>Eq. ({})</a>"#,
-    //                     elms[1], x
-    //                 )
-    //             }),
-    //         [kind, _] => Err(Error::UnknownReferenceKind{
-    //             kind: kind.to_owned().to_owned(), lineno,
-    //         }),
-    //         _ => Err(Error::UnexpectedReferenceArgCount {
-    //             count: elms.len(),
-    //             lineno
-    //         }),
-    //     }
-    //     } else {
-    //         fragments::generate_replacement_file_from_template(
-    //             fragment_path,
-    //             &content,
-    //             1.3,
-    //         )
-    //         .map(|replacement| {
-    //             let res = format_inline_equation(&replacement, renderer);
-    //             used_fragments.push(replacement.svg);
-    //             res
-    //         })
-    //     };
-
-    // generated_out
-    // })
-    // .collect::<Result<Vec<String>>>()
-    // .map(|x| x.join("\n"))
+/// `s` is the content withou
+fn transform_as_needed<'a>(
+    dollarless: &Content<'a>,
+    fragment_path: impl AsRef<Path>,
+    references: &HashMap<String, String>,
+    used_fragments: &mut Vec<PathBuf>,
+    renderer: SupportedRenderer,
+) -> Result<String> {
+    let fragment_path = fragment_path.as_ref();
+    let lineno = dollarless.start.lineno;
+    if let Some(stripped) = dollarless.strip_prefix("ref:") {
+        let elms = stripped.split(':').collect::<Vec<&str>>();
+        match &elms[..] {
+            ["fig", refere] => references
+                .get::<str>(refere)
+                .ok_or(Error::InvalidReference {
+                    to: elms[1].to_owned(),
+                    lineno,
+                })
+                .map(|x| format!(r#"<a class="fig_ref" href='#{}'>{}</a>"#, elms[1], x)),
+            ["bib", refere] => references
+                .get::<str>(refere)
+                .ok_or(Error::InvalidReference {
+                    to: elms[1].to_owned(),
+                    lineno,
+                })
+                .map(|x| {
+                    format!(
+                        r#"<a class="bib_ref" href='bibliography.html#{}'>{}</a>"#,
+                        elms[1], x
+                    )
+                }),
+            ["equ", refere] => references
+                .get::<str>(refere)
+                .ok_or(Error::InvalidReference {
+                    to: elms[1].to_owned(),
+                    lineno,
+                })
+                .map(|x| format!(r#"<a class="equ_ref" href='#{}'>Eq. ({})</a>"#, elms[1], x)),
+            [kind, _] => Err(Error::UnknownReferenceKind {
+                kind: kind.to_owned().to_owned(),
+                lineno,
+            }),
+            _ => Err(Error::UnexpectedReferenceArgCount {
+                count: elms.len(),
+                lineno,
+            }),
+        }
+    } else {
+        fragments::generate_replacement_file_from_template(fragment_path, &dollarless, 1.3).map(
+            |replacement| {
+                let res = format_inline_equation(&replacement, renderer);
+                used_fragments.push(replacement.svg);
+                res
+            },
+        )
+    }
 }
