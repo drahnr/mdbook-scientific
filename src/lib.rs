@@ -13,7 +13,7 @@ use mdbook::book::{Book, BookItem, Chapter};
 use mdbook::preprocess::{Preprocessor, PreprocessorContext};
 use nom_bibtex::*;
 
-use preprocess::{replace_blocks, replace_inline_blocks};
+use preprocess::replace_blocks;
 
 pub mod errors;
 pub use self::errors::*;
@@ -157,43 +157,6 @@ impl Scientific {
                                 //     eprintln!("+ {}", line);
                                 // }
                                 ch.content = reconstructed;
-                            }
-                        }
-                        Err(err) => error = Err(err),
-                    }
-                }
-            });
-
-            // process inline blocks like `$ .. $`
-            book.for_each_mut(|item| {
-                if error.is_err() {
-                    return;
-                }
-
-                if let BookItem::Chapter(ref mut ch) = item {
-                    let _head_number = ch
-                        .number
-                        .as_ref()
-                        .map(ToString::to_string)
-                        .unwrap_or_default();
-
-                    match replace_inline_blocks(
-                        &fragment_path,
-                        &ch.content,
-                        &references,
-                        renderer,
-                        &mut used_fragments,
-                    ) {
-                        Ok(mut reconstructed) => {
-                            reconstructed.push('\n');
-                            if reconstructed != ch.content {
-                                // for line in ch.content.lines() {
-                                //     eprintln!("- {}", line);
-                                // }
-                                // for line in reconstructed.lines() {
-                                //     eprintln!("+ {}", line);
-                                // }
-                                ch.content = reconstructed
                             }
                         }
                         Err(err) => error = Err(err),
