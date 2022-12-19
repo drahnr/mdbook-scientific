@@ -44,6 +44,8 @@ pub struct Content<'a> {
     pub start: LiCo,
     /// Until (including!)
     pub end: LiCo,
+    /// Byte range that can be used with the original to extract `s`
+    pub byte_range: std::ops::Range<usize>,
 }
 
 impl<'a> AsRef<str> for Content<'a> {
