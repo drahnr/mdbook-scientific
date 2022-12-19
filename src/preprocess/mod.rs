@@ -103,154 +103,6 @@ pub fn format_inline_equation<'a>(
     }
 }
 
-/// Takes a file residing at path, and uses it to produce
-/// includable rendered equations.
-pub fn replace_blocks(
-    fragment_path: &Path,
-    asset_path: &Path,
-    source: &str,
-    head_num: &str,
-    renderer: SupportedRenderer,
-    used_fragments: &mut Vec<PathBuf>,
-    references: &mut HashMap<String, String>,
-) -> Result<String> {
-    let mut content = String::new();
-
-    let mut start_loco: Option<(LiCo, String)> = None;
-
-    let mut figures_counter = 0;
-    let mut equations_counter = 0;
-
-    let mut add_object =
-        move |replacement: &Replacement<'_>, refer: &str, title: Option<&str>| -> String {
-            let file = replacement.svg.as_path();
-            used_fragments.push(file.to_owned());
-
-            if let Some(title) = title {
-                figures_counter += 1;
-                references.insert(
-                    refer.to_string(),
-                    format!("Figure {}{}", head_num, figures_counter),
-                );
-
-                format_figure(
-                    replacement,
-                    refer,
-                    head_num,
-                    figures_counter,
-                    title,
-                    renderer,
-                )
-            } else if !refer.is_empty() {
-                equations_counter += 1;
-                references.insert(
-                    refer.to_string(),
-                    format!("{}{}", head_num, equations_counter),
-                );
-                format_equation_block(replacement, refer, head_num, equations_counter, renderer)
-            } else {
-                format_equation(replacement, renderer)
-            }
-        };
-
-    fs::create_dir_all(fragment_path)?;
-
-    let mut acc = Vec::<String>::with_capacity(100);
-
-    for (lineno, line) in source.lines().enumerate() {
-        let leading_white = line.chars().take_while(|c| c.is_whitespace()).count();
-        // let _trailing_white = line.chars().rev().take_while(|c| c.is_whitespace()).count();
-
-        let line = line.trim();
-        let loco = LiCo {
-            lineno: lineno + 1,
-            column: leading_white + 1,
-        };
-
-        // look for a block
-        if !line.starts_with(BLOCK_DELIM) {
-            if start_loco.is_some() {
-                content.push_str(line);
-                content.push('\n');
-                continue;
-            } else {
-                acc.push(line.to_owned());
-                continue;
-            }
-        } else if line.ends_with(BLOCK_DELIM) && line.len() > 3 {
-            // line starts and end with BLOCK_DELIM
-            // set content to empty
-            start_loco = Some((loco, line.to_string()));
-            content = "".into();
-        }
-
-        if let Some((start_loco, param)) = start_loco.take() {
-            let elms = param
-                .splitn(3, ',')
-                .map(|x| x.trim())
-                .map(|x| x.replace(BLOCK_DELIM, ""))
-                .collect::<Vec<_>>();
-
-            let elms = elms.iter().map(|x| x.as_str()).collect::<Vec<_>>();
-
-            // if there is no content, try to load it from file
-            if content.is_empty() {
-                let path = asset_path.join(elms[1]).with_extension("tex");
-                if path.exists() {
-                    content = fs::read_to_string(path)?;
-                } else {
-                    eprintln!("Block empty, but file `{}` was not found!", elms[1]);
-                    continue;
-                }
-            }
-
-            {
-                let content = Content {
-                    s: content.as_str(),
-                    start: start_loco,
-                    end: loco,
-                    byte_range: unimplemented!("TODO"),
-                };
-
-                let generated_out = match &elms[..] {
-                    ["latex", refer, title] => fragments::parse_latex(fragment_path, &content)
-                        .map(|ref file| add_object(file, refer, Some(title))),
-                    ["gnuplot", refer, title] => fragments::parse_gnuplot(fragment_path, &content)
-                        .map(|ref file| add_object(file, refer, Some(title))),
-                    ["gnuplotonly", refer, title] => {
-                        fragments::parse_gnuplot_only(fragment_path, &content)
-                            .map(|ref file| add_object(file, refer, Some(title)))
-                    }
-
-                    ["equation", refer] | ["equ", refer] => {
-                        fragments::generate_replacement_file_from_template(
-                            fragment_path,
-                            &content,
-                            1.6,
-                        )
-                        .map(|ref file| add_object(file, refer, None))
-                    }
-
-                    ["equation"] | ["equ"] | _ => {
-                        fragments::generate_replacement_file_from_template(
-                            fragment_path,
-                            &content,
-                            1.6,
-                        )
-                        .map(|ref file| add_object(file, "", None))
-                    }
-                }?;
-                acc.push(generated_out)
-            }
-            content = String::new();
-        } else {
-            start_loco = Some((loco, line.to_string()));
-            continue;
-        }
-    }
-    Ok(acc.join("\n"))
-}
-
 /// Currently there is no way to display mermaid
 /// TODO FIXME
 pub fn gen_mermaid_charts(source: &str, renderer: SupportedRenderer) -> Result<String> {
@@ -293,22 +145,6 @@ pub fn gen_mermaid_charts(source: &str, renderer: SupportedRenderer) -> Result<S
     Ok(buf)
 }
 
-/// A dollar sign or maybe two, or three.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Dollar<'a> {
-    Start(&'a str),
-    End(&'a str),
-}
-
-impl<'a> AsRef<str> for Dollar<'a> {
-    fn as_ref(&self) -> &'a str {
-        match self {
-            Self::Start(s) => s,
-            Self::End(s) => s,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SplitTagPosition<'a> {
     /// Position in line + columns
@@ -342,7 +178,7 @@ fn dollar_split_tags_iter<'a>(source: &'a str) -> impl Iterator<Item = SplitTagP
                 *state += current_char_cnt + 1;
 
                 // the end of the previous line
-                let previous = LiCo {
+                let _previous = LiCo {
                     lineno: lineno.saturating_sub(1),
                     column: previous_char_cnt,
                 };
@@ -481,12 +317,11 @@ fn iter_over_dollar_encompassed_blocks<'a>(
                 },
                 end: nxt.lico,
                 byte_range,
+                delimiter: Dollar::Empty
             })))
         }
         _ => None,
     };
-    // if there is a pre, the first one should be a replace, so it offsets the index by one
-    let offset = dbg!(if pre.is_some() { 1 } else { 0 });
     let mut iter = iter.tuple_windows().enumerate().map(
         move |(
             idx,
@@ -527,6 +362,7 @@ fn iter_over_dollar_encompassed_blocks<'a>(
                 start: start.lico,
                 end: end.lico,
                 byte_range,
+                delimiter: start.which,
             };
 
             if replace {
@@ -539,31 +375,48 @@ fn iter_over_dollar_encompassed_blocks<'a>(
     pre.into_iter().chain(iter)
 }
 
-pub fn replace_inline_blocks(
-    fragment_path: &Path,
+pub fn replace_blocks(
+    fragment_path: impl AsRef<Path>,
+    asset_path: impl AsRef<Path>,
     source: &str,
-    references: &HashMap<String, String>,
+    head_num: &str,
     renderer: SupportedRenderer,
     used_fragments: &mut Vec<PathBuf>,
+    references: &mut HashMap<String, String>,
 ) -> Result<String> {
-    let mut iter = dollar_split_tags_iter(source);
+    let fragment_path = fragment_path.as_ref();
+    fs::create_dir_all(fragment_path)?;
+
+    let iter = dollar_split_tags_iter(source);
     let s = iter_over_dollar_encompassed_blocks(source, iter)
         .map(|tagged| {
-            let mut content = tagged.as_ref();
+            let content = tagged.as_ref();
             // let mut dollarless_range = content.byte_range.clone();
             let regex = regex::Regex::new(r###"^\$+(.+)\$+"###).unwrap();
-            let dollarless = regex.replace_all(content.as_ref(), "");
+            let dollarless = regex.replace_all(content.as_ref(), "$1");
             let mut content = content.clone();
             // a bit bonkers FIXME XXX incoherent datastructure
             content.s = dollarless.as_ref();
 
-            transform_as_needed(
-                &content,
-                fragment_path,
-                &references,
-                used_fragments,
-                renderer,
-            )
+            if !content.delimiter.is_block() {
+                transform_block_as_needed(
+                    &content,
+                    fragment_path,
+                    head_num,
+                    references,
+                    used_fragments,
+                    renderer,
+                )
+            } else {
+                transform_inline_as_needed(
+                    &content,
+                    fragment_path,
+                    head_num,
+                    references,
+                    used_fragments,
+                    renderer,
+                )
+            }
         })
         .collect::<Result<Vec<String>>>()?
         .into_iter()
@@ -571,10 +424,98 @@ pub fn replace_inline_blocks(
     Ok(s)
 }
 
-/// `s` is the content withou
-fn transform_as_needed<'a>(
+fn transform_inline_as_needed<'a>(
     dollarless: &Content<'a>,
     fragment_path: impl AsRef<Path>,
+    head_num: &str,
+    references: &mut HashMap<String, String>,
+    used_fragments: &mut Vec<PathBuf>,
+    renderer: SupportedRenderer,
+) -> Result<String> {
+    let fragment_path = fragment_path.as_ref();
+    let lineno = dollarless.start.lineno;
+    let content = dollarless;
+
+    let mut figures_counter = 0;
+    let mut equations_counter = 0;
+
+    if let Some(stripped) = dollarless.strip_prefix("ref:") {
+        let mut add_object =
+            move |replacement: &Replacement<'_>, refer: &str, title: Option<&str>| -> String {
+                let file = replacement.svg.as_path();
+                used_fragments.push(file.to_owned());
+
+                if let Some(title) = title {
+                    figures_counter += 1;
+                    references.insert(
+                        refer.to_string(),
+                        format!("Figure {}{}", head_num, figures_counter),
+                    );
+
+                    format_figure(
+                        replacement,
+                        refer,
+                        head_num,
+                        figures_counter,
+                        title,
+                        renderer,
+                    )
+                } else if !refer.is_empty() {
+                    equations_counter += 1;
+                    references.insert(
+                        refer.to_string(),
+                        format!("{}{}", head_num, equations_counter),
+                    );
+                    format_equation_block(replacement, refer, head_num, equations_counter, renderer)
+                } else {
+                    format_equation(replacement, renderer)
+                }
+            };
+
+        let elms = stripped.split(':').collect::<Vec<&str>>();
+        match &elms[..] {
+            ["latex", refer, title] => fragments::parse_latex(fragment_path, &content)
+                .map(|ref file| add_object(file, refer, Some(title))),
+            ["gnuplot", refer, title] => fragments::parse_gnuplot(fragment_path, &content)
+                .map(|ref file| add_object(file, refer, Some(title))),
+            ["gnuplotonly", refer, title] => fragments::parse_gnuplot_only(fragment_path, &content)
+                .map(|ref file| add_object(file, refer, Some(title))),
+
+            ["equation", refer] | ["equ", refer] => {
+                fragments::generate_replacement_file_from_template(fragment_path, &content, 1.6)
+                    .map(|ref file| add_object(file, refer, None))
+            }
+
+            ["equation"] | ["equ"] | _ => {
+                fragments::generate_replacement_file_from_template(fragment_path, &content, 1.6)
+                    .map(|ref file| add_object(file, "", None))
+            }
+
+            [kind, _] => Err(Error::UnknownReferenceKind {
+                kind: kind.to_owned().to_owned(),
+                lineno,
+            }),
+            _ => Err(Error::UnexpectedReferenceArgCount {
+                count: elms.len(),
+                lineno,
+            }),
+        }
+    } else {
+        fragments::generate_replacement_file_from_template(fragment_path, &dollarless, 1.3).map(
+            |replacement| {
+                let res = format_inline_equation(&replacement, renderer);
+                used_fragments.push(replacement.svg);
+                res
+            },
+        )
+    }
+}
+
+/// `s` is the content withou
+fn transform_block_as_needed<'a>(
+    dollarless: &Content<'a>,
+    fragment_path: impl AsRef<Path>,
+    head_num: &str,
     references: &HashMap<String, String>,
     used_fragments: &mut Vec<PathBuf>,
     renderer: SupportedRenderer,
@@ -610,6 +551,7 @@ fn transform_as_needed<'a>(
                     lineno,
                 })
                 .map(|x| format!(r#"<a class="equ_ref" href='#{}'>Eq. ({})</a>"#, elms[1], x)),
+
             [kind, _] => Err(Error::UnknownReferenceKind {
                 kind: kind.to_owned().to_owned(),
                 lineno,

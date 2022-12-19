@@ -27,6 +27,30 @@ impl FromStr for SupportedRenderer {
     }
 }
 
+/// A dollar sign or maybe two, or three.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Dollar<'a> {
+    Start(&'a str),
+    End(&'a str),
+    Empty,
+}
+
+impl Dollar<'_> {
+    pub fn is_block(&self) -> bool {
+        self.as_ref().starts_with("$$")
+    }
+}
+
+impl<'a> AsRef<str> for Dollar<'a> {
+    fn as_ref(&self) -> &'a str {
+        match self {
+            Self::Start(s) => s,
+            Self::End(s) => s,
+            Self::Empty => "",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LiCo {
     /// Base 1 line number
@@ -46,6 +70,8 @@ pub struct Content<'a> {
     pub end: LiCo,
     /// Byte range that can be used with the original to extract `s`
     pub byte_range: std::ops::Range<usize>,
+    /// Enclosing delimiter
+    pub delimiter: Dollar<'a>,
 }
 
 impl<'a> AsRef<str> for Content<'a> {

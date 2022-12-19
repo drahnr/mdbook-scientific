@@ -116,7 +116,7 @@ mod sequester {
             let split_points_iter = dollar_split_tags_iter(LIT);
             let ist = iter_over_dollar_encompassed_blocks(LIT, split_points_iter);
             let ist = Vec::<Tagged<'_>>::from_iter(ist);
-            ist.iter().zip(soll.iter()).enumerate().for_each(|(idx, (ist, soll)): (usize, (_, &SollSequester))| {
+            ist.iter().zip(soll.iter()).enumerate().for_each(|(_idx, (ist, soll)): (usize, (_, &SollSequester))| {
                 assert_eq!(&LIT[soll.bytes.clone()], soll.content, "Test case integrity violated");
                 match dbg!(&ist) {
                     Tagged::Replace(_c) => { assert!(!soll.keep); }
@@ -168,7 +168,7 @@ $$
 1
 $$"# =>
     (K, 0..24, r#"Hello, there is a block
-"#),
+    "#),
     (R, 24..31, "$$
 1
 $$")
