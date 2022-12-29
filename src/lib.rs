@@ -21,6 +21,9 @@ pub use self::errors::*;
 pub mod types;
 pub use self::types::*;
 
+#[cfg(test)]
+mod tests;
+
 pub struct Scientific;
 
 impl Scientific {
@@ -121,7 +124,13 @@ impl Scientific {
             // TODO make this prerendered stuff too
             book.for_each_mut(|item| {
                 if let BookItem::Chapter(ref mut ch) = item {
-                    ch.content = gen_mermaid_charts(ch.content.as_str(), renderer).unwrap();
+                    ch.content = gen_mermaid_charts(
+                        ch.content.as_str(),
+                        ch.number.as_ref().unwrap().to_string(),
+                        &asset_path,
+                        renderer,
+                    )
+                    .unwrap();
                 }
             });
 

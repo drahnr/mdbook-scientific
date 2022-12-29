@@ -1,6 +1,8 @@
 use fs_err as fs;
-use itertools::{CombinationsWithReplacement, Itertools, MultiPeek, PeekingNext};
+use itertools::Itertools;
+use sha2::Digest;
 use std::collections::HashMap;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use crate::errors::{Error, Result};
@@ -103,39 +105,109 @@ pub fn format_inline_equation<'a>(
     }
 }
 
+fn create_svg_from_mermaid(
+    code: &str,
+    dest: impl AsRef<Path>,
+    chapterno: &str,
+    counter: usize,
+) -> Result<PathBuf> {
+    let mmdc = which::which("mmdc")?;
+    let dest = dest.as_ref();
+
+    let dest = dest.join(format!("mermaid_{}_{}.svg", chapterno, counter));
+
+    let mut child = std::process::Command::new(mmdc)
+        .arg("--outputFormat=svg")
+        .arg(format!("--output={}", dest.display()))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()?;
+
+    // FIXME make this simpler
+    let code = code.to_owned();
+    let mut stdin = child.stdin.take().unwrap();
+    let j = std::thread::spawn(move || {
+        stdin.write(code.as_bytes())?;
+        Ok::<_, crate::errors::Error>(())
+    });
+    let mut stdout = child.stdout.unwrap();
+    let mut buf = String::with_capacity(8192);
+    stdout.read_to_string(&mut buf)?;
+
+    j.join().unwrap()?;
+    dbg!(buf);
+
+    Ok(dest)
+}
+
 /// Currently there is no way to display mermaid
 /// TODO FIXME
-pub fn gen_mermaid_charts(source: &str, renderer: SupportedRenderer) -> Result<String> {
+pub fn gen_mermaid_charts(
+    source: &str,
+    chapterno: String,
+    dest: impl AsRef<Path>,
+    renderer: SupportedRenderer,
+) -> Result<String> {
     match renderer {
         // markdown and html can just fine deal with it
         SupportedRenderer::Html => return Ok(source.to_owned()),
-        SupportedRenderer::Markdown => return Ok(source.to_owned()),
+        // SupportedRenderer::Markdown => return Ok(source.to_owned()),
         _ => {
             eprintln!("Stripping `mermaid` fencing of code block, not supported yet")
         }
     }
+
+    let dest = dest.as_ref();
 
     use pulldown_cmark::*;
     use pulldown_cmark_to_cmark::cmark;
 
     let mut buf = String::with_capacity(source.len());
 
+    #[derive(Debug, Default)]
+    struct State {
+        is_mermaid_block: bool,
+        counter: usize,
+    }
+
     let events = Parser::new_ext(&source, Options::all())
         .into_offset_iter()
-        .filter_map(|(mut event, _offset)| {
+        .scan(State::default(), |state, (mut event, _offset)| {
             match event {
                 Event::Start(Tag::CodeBlock(ref mut kind)) => match kind {
                     CodeBlockKind::Fenced(s) if s.as_ref() == "mermaid" => {
                         *kind = CodeBlockKind::Fenced("text".into());
+                        state.counter += 1;
+                        state.is_mermaid_block = true;
+                        return None;
                     }
                     _ => {}
                 },
                 Event::End(Tag::CodeBlock(ref mut kind)) => match kind {
                     CodeBlockKind::Fenced(s) if s.as_ref() == "mermaid" => {
                         *kind = CodeBlockKind::Fenced("text".into());
+                        state.is_mermaid_block = false;
+                        return None;
                     }
                     _ => {}
                 },
+                Event::Code(ref code) => {
+                    if state.is_mermaid_block {
+                        let svg_path = dbg!(create_svg_from_mermaid(
+                            code.as_ref(),
+                            dest,
+                            chapterno.as_str(),
+                            state.counter
+                        )
+                        .expect("mermaid graph issue"));
+                        let inject = Tag::Image(
+                            LinkType::Inline,
+                            "url".into(),
+                            format!("Chapter {} Graphic {}", chapterno.as_str(), state.counter)
+                                .into(),
+                        );
+                    }
+                }
                 _ => {}
             }
             Some(event)
@@ -225,10 +297,9 @@ fn dollar_split_tags_iter<'a>(source: &'a str) -> impl Iterator<Item = SplitTagP
                     );
                 }
 
-                // process chunks within a line:
                 let mut is_intra_inline_code = false;
-                let mut is_intra_inline_comment = false;
                 let mut is_between_dollar_content = false;
+
                 // use to collect ranges
                 let mut v = Vec::from_iter(line_content.char_indices().enumerate().filter_map(
                     |(il_char_offset, (il_byte_offset, c))| {
@@ -300,7 +371,7 @@ impl<'a> AsRef<Content<'a>> for Tagged<'a> {
 
 fn iter_over_dollar_encompassed_blocks<'a>(
     source: &'a str,
-    mut iter: impl Iterator<Item = SplitTagPosition<'a>>,
+    iter: impl Iterator<Item = SplitTagPosition<'a>>,
 ) -> impl Iterator<Item = Tagged<'a>> {
     // make sure the first part is kept if it doesn't start with a dollar sign
     let mut iter = iter.peekable();
@@ -322,7 +393,7 @@ fn iter_over_dollar_encompassed_blocks<'a>(
         }
         _ => None,
     };
-    let mut iter = iter.tuple_windows().enumerate().map(
+    let iter = iter.tuple_windows().enumerate().map(
         move |(
             idx,
             (
