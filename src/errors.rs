@@ -58,4 +58,7 @@ pub enum Error {
 
     #[error(transparent)]
     MdBook(#[from] mdbook::errors::Error),
+
+    #[error(transparent)]
+    Which(#[from] which::Error),
 }
