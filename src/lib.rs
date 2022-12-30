@@ -3,7 +3,7 @@ mod preprocess;
 
 use crate::errors::Error;
 use fs_err as fs;
-use preprocess::gen_mermaid_charts;
+use preprocess::replace_mermaid_charts;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
@@ -124,7 +124,7 @@ impl Scientific {
             // TODO make this prerendered stuff too
             book.for_each_mut(|item| {
                 if let BookItem::Chapter(ref mut ch) = item {
-                    ch.content = gen_mermaid_charts(
+                    ch.content = replace_mermaid_charts(
                         ch.content.as_str(),
                         ch.number.as_ref().unwrap().to_string(),
                         &asset_path,
