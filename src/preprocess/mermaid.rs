@@ -30,7 +30,6 @@ fn create_svg_from_mermaid(
     stdout.read_to_string(&mut buf)?;
 
     j.join().unwrap()?;
-    dbg!(buf);
 
     Ok(dest)
 }
@@ -43,6 +42,7 @@ pub fn replace_mermaid_charts(
     chapterno: String,
     dest: impl AsRef<Path>,
     renderer: SupportedRenderer,
+    used_fragments: &mut Vec<PathBuf>,
 ) -> Result<String> {
     match renderer {
         // html can just fine deal with it
@@ -93,6 +93,7 @@ pub fn replace_mermaid_charts(
                         chapterno.as_str(),
                         state.counter,
                     )?;
+                    used_fragments.push(svg_path.clone());
 
                     let desc: CowStr =
                         format!("Chapter {}, Graphic {}", chapterno.as_str(), state.counter).into();
@@ -141,6 +142,7 @@ graph
             "1.2.3".into(),
             dest,
             SupportedRenderer::Markdown,
+            &mut Vec::new(),
         )
         .unwrap();
 
