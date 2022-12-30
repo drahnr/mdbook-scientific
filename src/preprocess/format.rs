@@ -1,6 +1,5 @@
 use super::*;
 
-
 pub fn format_figure<'a>(
     replacement: &Replacement<'a>,
     refer: &str,
