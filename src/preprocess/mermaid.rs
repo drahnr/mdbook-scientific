@@ -87,20 +87,20 @@ pub fn replace_mermaid_charts(
 
             Event::Text(ref code) | Event::Code(ref code) => {
                 if state.is_mermaid_block {
-                    let svg_path = dbg!(create_svg_from_mermaid(
+                    let svg_path = create_svg_from_mermaid(
                         code.as_ref(),
                         dest,
                         chapterno.as_str(),
-                        state.counter
-                    )
-                    .expect("mermaid graph issue"));
+                        state.counter,
+                    )?;
 
                     let desc: CowStr =
                         format!("Chapter {}, Graphic {}", chapterno.as_str(), state.counter).into();
+                    let title = desc.clone();
                     let inject = Tag::Image(
                         LinkType::Inline,
                         svg_path.display().to_string().into(),
-                        desc.clone(),
+                        title,
                     );
 
                     events.push(Event::Start(inject.clone()));
