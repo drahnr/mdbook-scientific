@@ -120,8 +120,7 @@ impl Scientific {
                 .unwrap_or("src/");
             let asset_path = ctx.root.join(asset_path);
 
-            // comment out mermaid charts as regular code blocks
-            // TODO make this prerendered stuff too
+            // replace mermaid charts with prerendered svgs
             book.for_each_mut(|item| {
                 if let BookItem::Chapter(ref mut ch) = item {
                     ch.content = replace_mermaid_charts(
@@ -129,6 +128,7 @@ impl Scientific {
                         ch.number.as_ref().unwrap().to_string(),
                         &asset_path,
                         renderer,
+                        &mut used_fragments,
                     )
                     .unwrap();
                 }
