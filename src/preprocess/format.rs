@@ -24,7 +24,7 @@ pub fn format_figure<'a>(
             )
         }
         Latex | Tectonic => {
-            format!(r#"\[{}\]"#, replacement.intermediate())
+            format!(r#"\[{}\]"#, replacement.inner_str_or_intermediate())
         }
     }
 }
@@ -52,7 +52,7 @@ pub fn format_equation_block<'a>(
             )
         }
         Latex | Tectonic => {
-            format!(r#"\[{}\]"#, replacement.intermediate())
+            format!(r#"\[{}\]"#, replacement.inner_str_or_intermediate())
         }
     }
 }
@@ -67,7 +67,7 @@ pub fn format_equation<'a>(replacement: &Replacement<'a>, renderer: SupportedRen
             )
         }
         Latex | Tectonic => {
-            format!(r#"\[{}\]"#, replacement.intermediate())
+            format!(r#"\[{}\]"#, replacement.inner_str_or_intermediate())
         }
     }
 }
@@ -85,7 +85,7 @@ pub fn format_inline_equation<'a>(
             )
         }
         Latex | Tectonic => {
-            format!(r#"${}$"#, replacement.content.s)
+            format!(r#"${}$"#, replacement.inner_str_or_intermediate())
         }
     }
 }

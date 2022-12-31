@@ -115,7 +115,7 @@ fn generate_latex_from_gnuplot<'a>(
     content: &Content<'a>,
     filename: &str,
 ) -> Result<()> {
-    let content = content.as_ref();
+    let content = content.trimmed().as_str();
     let gnuplot_path = find_binary("gnuplot")?;
 
     let cmd = Command::new(gnuplot_path)
@@ -139,10 +139,10 @@ pub fn generate_replacement_file_from_template<'a>(
     content: &Content<'a>,
     zoom: f32,
 ) -> Result<Replacement<'a>> {
-    let name = hash(content);
+    let name = hash(content.as_str());
     let path = dest_path.join(&name);
 
-    eprintln!(
+    log::debug!(
         r#"Found equation from {}:{}..{}:{}:
     {}"#,
         content.start.lineno,
@@ -151,29 +151,31 @@ pub fn generate_replacement_file_from_template<'a>(
         content.end.column,
         content.s
     );
-    eprintln!("Using temporary helper file {}", path.display());
+    eprintln!(
+        "Using temporary helper file {}",
+        path.with_extension("tex").display()
+    );
 
-    let tex = content.as_ref();
+    let tex = content.trimmed().as_str();
+
     // create a new tex file containing the equation
-    if !path.with_extension("tex").exists() {
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(path.with_extension("tex"))?;
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(path.with_extension("tex"))?;
 
-        let fragment = include_str!("fragment.tex")
-            .split("$$")
-            .enumerate()
-            .map(|(idx, s)| match idx {
-                0 | 2 => s,
-                1 => tex,
-                _ => unreachable!("fragment.tex must have exactly 2 instances of `$$`"),
-            })
-            .join("$$");
+    let fragment = include_str!("fragment.tex")
+        .split("$$")
+        .enumerate()
+        .map(|(idx, s)| match idx {
+            0 | 2 => s,
+            1 => tex,
+            _ => unreachable!("fragment.tex must have exactly 2 instances of `$$`"),
+        })
+        .join("$$");
 
-        file.write_all(fragment.as_bytes())?;
-    }
+    file.write_all(fragment.as_bytes())?;
 
     generate_svg_from_latex(&path, zoom)?;
 
@@ -186,7 +188,7 @@ pub fn generate_replacement_file_from_template<'a>(
 
 /// Parse a latex content and convert it to a SVG file
 pub fn parse_latex<'a>(dest_path: &Path, content: &Content<'a>) -> Result<Replacement<'a>> {
-    let tex = content.as_ref();
+    let tex = content.trimmed().as_str();
     let name = hash(tex);
     let path = dest_path.join(&name);
 
@@ -212,7 +214,7 @@ pub fn parse_latex<'a>(dest_path: &Path, content: &Content<'a>) -> Result<Replac
 
 /// Parse a gnuplot file and generate a SVG file
 pub fn parse_gnuplot<'a>(dest_path: &Path, content: &Content<'a>) -> Result<Replacement<'a>> {
-    let name = hash(content);
+    let name = hash(content.as_str());
     let path = dest_path.join(&name);
 
     if !path.with_extension("tex").exists() {
@@ -235,7 +237,7 @@ pub fn parse_gnuplot<'a>(dest_path: &Path, content: &Content<'a>) -> Result<Repl
 
 /// Parse gnuplot without using the latex backend
 pub fn parse_gnuplot_only<'a>(dest_path: &Path, content: &Content<'a>) -> Result<Replacement<'a>> {
-    let gnuplot_input = content.as_ref();
+    let gnuplot_input = content.trimmed().as_str();
     let name = hash(gnuplot_input);
     let path = dest_path.join(&name);
 

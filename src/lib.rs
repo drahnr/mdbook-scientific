@@ -54,6 +54,12 @@ impl Preprocessor for Scientific {
 
 impl Scientific {
     fn run_inner(&self, ctx: &PreprocessorContext, mut book: Book) -> Result<Book> {
+        use env_logger::Builder;
+        use log::LevelFilter;
+        let mut builder = Builder::from_default_env();
+
+        builder.filter(None, LevelFilter::Debug).init();
+
         if let Some(cfg) = ctx.config.get_preprocessor(self.name()) {
             let renderer = SupportedRenderer::from_str(ctx.renderer.as_str())?;
 
@@ -67,6 +73,7 @@ impl Scientific {
             fs::create_dir_all(fragment_path)?;
 
             let fragment_path = fs::canonicalize(fragment_path)?;
+            log::info!("Using fragment path: {}", fragment_path.display());
 
             // track which fragments we use to copy them into the assets folder
             let mut used_fragments = Vec::new();
@@ -124,6 +131,22 @@ impl Scientific {
             // replace mermaid charts with prerendered svgs
             book.for_each_mut(|item| {
                 if let BookItem::Chapter(ref mut ch) = item {
+                    log::info!(
+                        "Processing chapter {} - {}",
+                        ch.number
+                            .as_ref()
+                            .map(|sn| sn.to_string())
+                            .unwrap_or("Pre".to_owned()),
+                        ch.name.as_str()
+                    );
+                    log::debug!(
+                        "Chapter resides at {}",
+                        ch.path
+                            .as_ref()
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_else(|| { "?".to_owned() })
+                    );
+
                     ch.content = replace_mermaid_charts(
                         ch.content.as_str(),
                         ch.number

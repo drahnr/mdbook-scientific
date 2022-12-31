@@ -89,48 +89,124 @@ $ foo $ $$ $?
     );
 }
 
+mod dollarless {
+    use super::*;
+    macro_rules! test_dollarless {
+        ($name:ident : $input:literal => $lineno1:literal / $column1:literal .. $lineno2:literal / $column2:literal, $content:literal $(, $params:literal)? $(,)? ) => {
+            #[test]
+            fn $name () {
+                const NAME: &str = stringify!($name);
+                let is_inline = NAME.contains("inline");
+                let is_block = NAME.contains("block");
+                let delimiter = if is_inline && !is_block {
+                    "$"
+                } else if !is_inline && is_block {
+                    "$$"
+                } else {
+                    unreachable!("Name must either include block or inline, to determine the expected delimiter!");
+                };
+                assert!($input.starts_with(delimiter));
+                test_dollarless!(split > delimiter, $input => $lineno1 / $column1 .. $lineno2 / $column2, $content $(, $params)?);
+            }
+        };
+
+
+        (split > $delimiter:expr, $input:literal => $lineno1:literal / $column1:literal .. $lineno2:literal / $column2:literal, $content:literal) => {
+            test_dollarless!(inner > $delimiter, $input => $lineno1 / $column1 .. $lineno2 / $column2, $content, None)
+        };
+        (split > $delimiter:expr, $input:literal => $lineno1:literal / $column1:literal .. $lineno2:literal / $column2:literal, $content:literal, $params:literal ) => {
+            test_dollarless!(inner > $delimiter, $input => $lineno1 / $column1 .. $lineno2 / $column2, $content, Some($params))
+        };
+
+        (inner > $delimiter:expr, $input:literal => $lineno1:literal / $column1:literal .. $lineno2:literal / $column2:literal, $content:literal, $maybe_params:expr ) => {
+                const INPUT: &str = $input;
+                let maybe_params: Option<&str> = $maybe_params;
+                let (last_lineno, last_line) = INPUT.lines().enumerate().last().expect("Must have at least one line. qed");
+                let (last_line_char_offset, (_, _)) = last_line.char_indices().enumerate().last().unwrap();
+                let content = Content {
+                    s: INPUT,
+                    start: LiCo { lineno: 1, column: 1, },
+                    end: LiCo { lineno: last_lineno + 1, column: last_line_char_offset, },
+                    byte_range: 0..INPUT.len(),
+                    start_del: Dollar::Start($delimiter),
+                    end_del: Dollar::End($delimiter),
+                };
+                let dollarless = content.trimmed();
+                assert!(dbg!(&dollarless.byte_range).len() < dbg!(&content.byte_range).len());
+
+                assert!(dbg!(&dollarless.byte_range.start) > dbg!(&content.byte_range.start));
+                assert!(dbg!(&dollarless.byte_range.end) < dbg!(&content.byte_range.end));
+
+                assert_eq!(dollarless.trimmed, &content.s[dollarless.byte_range]);
+                assert!(dbg!(dollarless.start) > dbg!(content.start));
+                assert!(dbg!(dollarless.end) <= dbg!(content.end)); // FIXME must be less than!
+                assert_eq!(dbg!(dollarless.parameters), dbg!(maybe_params));
+                assert_eq!(dbg!(dollarless.start), dbg!(LiCo { lineno: $lineno1, column: $column1 }));
+                assert_eq!(dbg!(dollarless.end), dbg!(LiCo { lineno: $lineno2, column: $column2 }));
+            };
+    }
+
+    // practically not reachable, since blocks are processed first
+    // test_dollarless!(empty_inline: r###"$$"### => 1/1..1/1, "");
+
+    test_dollarless!(boring_inline: r###"$xyz$"### => 1/2..1/4, "xyz", );
+
+    test_dollarless!(block_w_params: r###"$$params,params,params
+foo
+$$"### => 2/1..2/4, r###"foo"###, "params,params,params");
+
+    test_dollarless!(empty_block: r###"$$
+$$"### => 2/1..2/1, r###""###);
+
+    test_dollarless!(boring_block: r###"$$
+hello charlie$
+$$"### => 2/1..2/15, r###"hello charlie$"###);
+}
+
 mod sequester {
 
     use super::*;
 
+    /// Expected value
     struct SollSequester {
         keep: bool,
         bytes: std::ops::Range<usize>,
         content: &'static str,
     }
 
+    /// Helper constants for better legibility in test cases
     const K: bool = true;
     const R: bool = false;
+
     macro_rules! test_sequester {
     ($name:ident : $input:tt $( =>)? $( ($keep:ident, $byte_start:literal .. $byte_end:literal, $content:literal) ),* ) => {
-        #[test]
-        fn $name () {
-            const LIT: &str = $input;
-            let soll: &[SollSequester] = &[
-                $( SollSequester {
-                    keep: $keep,
-                    bytes: $byte_start .. $byte_end,
-                    content: $content,
-                }),*
-            ];
-            let split_points_iter = dollar_split_tags_iter(LIT);
-            let ist = iter_over_dollar_encompassed_blocks(LIT, split_points_iter);
-            let ist = Vec::<Tagged<'_>>::from_iter(ist);
-            ist.iter().zip(soll.iter()).enumerate().for_each(|(_idx, (ist, soll)): (usize, (_, &SollSequester))| {
-                assert_eq!(&LIT[soll.bytes.clone()], soll.content, "Test case integrity violated");
-                match dbg!(&ist) {
-                    Tagged::Replace(_c) => { assert!(!soll.keep); }
-                    Tagged::Keep(_c) => { assert!(soll.keep); }
-                }
-                let content: &Content<'_> = ist.as_ref();
-                assert_eq!(&content.s[..], &soll.content[..]);
-                assert_eq!(&content.s[..], &LIT[soll.bytes.clone()]);
-            })
+            #[test]
+            fn $name () {
+                const LIT: &str = $input;
+                let soll: &[SollSequester] = &[
+                    $( SollSequester {
+                        keep: $keep,
+                        bytes: $byte_start .. $byte_end,
+                        content: $content,
+                    }),*
+                ];
+                let split_points_iter = dollar_split_tags_iter(LIT);
+                let ist = iter_over_dollar_encompassed_blocks(LIT, split_points_iter);
+                let ist = Vec::<Tagged<'_>>::from_iter(ist);
+                ist.iter().zip(soll.iter()).enumerate().for_each(|(_idx, (ist, soll)): (usize, (_, &SollSequester))| {
+                    assert_eq!(&LIT[soll.bytes.clone()], soll.content, "Test case integrity violated");
+                    match dbg!(&ist) {
+                        Tagged::Replace(_c) => { assert!(!soll.keep); }
+                        Tagged::Keep(_c) => { assert!(soll.keep); }
+                    }
+                    let content: &Content<'_> = ist.as_ref();
+                    assert_eq!(&content.s[..], &soll.content[..]);
+                    assert_eq!(&content.s[..], &LIT[soll.bytes.clone()]);
+                })
 
-        }
-    };
-
-}
+            }
+        };
+    }
 
     test_sequester!(
     singlje_x:

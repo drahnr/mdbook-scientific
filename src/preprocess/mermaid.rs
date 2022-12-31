@@ -48,14 +48,13 @@ pub fn replace_mermaid_charts(
         // html can just fine deal with it
         SupportedRenderer::Html => return Ok(source.to_owned()),
         _ => {
-            // eprintln!("Stripping `mermaid` fencing of code block, not supported yet")
+            log::info!("Replacing mermaid graph in file {}", "where???");
         }
     }
 
     let dest = dest.as_ref();
 
     use pulldown_cmark::*;
-    use pulldown_cmark_to_cmark::cmark;
 
     let mut buf = String::with_capacity(source.len());
 
@@ -67,7 +66,7 @@ pub fn replace_mermaid_charts(
 
     let mut events = vec![];
     let mut state = State::default();
-    for (event, offset) in Parser::new_ext(&source, Options::all()).into_offset_iter() {
+    for (event, _offset) in Parser::new_ext(&source, Options::all()).into_offset_iter() {
         match event {
             Event::Start(Tag::CodeBlock(ref kind)) => match kind {
                 CodeBlockKind::Fenced(s) if s.as_ref() == "mermaid" => {
@@ -115,8 +114,7 @@ pub fn replace_mermaid_charts(
         events.push(event);
     }
 
-    pulldown_cmark_to_cmark::cmark(dbg!(events).into_iter(), &mut buf)
-        .map_err(Error::CommonMarkGlue)?;
+    pulldown_cmark_to_cmark::cmark(events.into_iter(), &mut buf).map_err(Error::CommonMarkGlue)?;
     Ok(buf)
 }
 

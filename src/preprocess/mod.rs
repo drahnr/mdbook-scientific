@@ -1,16 +1,12 @@
 use fs_err as fs;
 use itertools::Itertools;
-use sha2::Digest;
 use std::collections::HashMap;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::errors::{Error, Result};
 use crate::fragments;
 use crate::types::*;
-
-const BLOCK_DELIM: &str = "$$";
-const INLINE_BLOCK_DELIM: &str = "$";
 
 mod mermaid;
 pub use self::mermaid::*;
@@ -132,10 +128,7 @@ fn dollar_split_tags_iter<'a>(source: &'a str) -> impl Iterator<Item = SplitTagP
                 ));
 
                 if v.len() & 0x1 != 0 {
-                    let last = v
-                        .last()
-                        .expect("If length is uneven, last is `Some(_)`. qed");
-                    eprintln!("Inserting $-sign at end of line #{lineno}!");
+                    log::warn!("Inserting $-sign at end of line #{lineno}!");
                     v.push(SplitTagPosition {
                         lico: LiCo {
                             lineno,
@@ -182,10 +175,10 @@ fn iter_over_dollar_encompassed_blocks<'a>(
     // make sure the first part is kept if it doesn't start with a dollar sign
     let mut iter = iter.peekable();
     let pre = match iter.peek() {
-        Some(nxt) if dbg!(nxt.byte_offset) > 0 => {
+        Some(nxt) if nxt.byte_offset > 0 => {
             let byte_range = 0..(nxt.byte_offset);
             let s = &source[byte_range.clone()];
-            Some(dbg!(Tagged::Keep(Content {
+            Some(Tagged::Keep(Content {
                 // content without the $ delimiters FIXME
                 s,
                 start: LiCo {
@@ -194,8 +187,9 @@ fn iter_over_dollar_encompassed_blocks<'a>(
                 },
                 end: nxt.lico,
                 byte_range,
-                delimiter: Dollar::Empty
-            })))
+                start_del: Dollar::Empty,
+                end_del: nxt.which,
+            }))
         }
         _ => None,
     };
@@ -233,14 +227,16 @@ fn iter_over_dollar_encompassed_blocks<'a>(
             };
 
             // not within, so just return a string
-            let content = Content {
-                // content without the $ delimiters FIXME
+            let content = dbg!(Content {
+                // content _including_ the $ delimiters
                 s: &source[byte_range.clone()],
                 start: start.lico,
                 end: end.lico,
                 byte_range,
-                delimiter: start.which,
-            };
+                // delimiters
+                start_del: start.which,
+                end_del: end.which,
+            });
 
             if replace {
                 Tagged::Replace(content)
@@ -266,33 +262,31 @@ pub fn replace_blocks(
 
     let iter = dollar_split_tags_iter(source);
     let s = iter_over_dollar_encompassed_blocks(source, iter)
-        .map(|tagged| {
-            let content = tagged.as_ref();
-            // let mut dollarless_range = content.byte_range.clone();
-            let regex = regex::Regex::new(r###"^\$+(.+)\$+"###).unwrap();
-            let dollarless = regex.replace_all(content.as_ref(), "$1");
-            let mut content = content.clone();
-            // a bit bonkers FIXME XXX incoherent datastructure
-            content.s = dollarless.as_ref();
-
-            if !content.delimiter.is_block() {
-                transform_block_as_needed(
-                    &content,
-                    fragment_path,
-                    head_num,
-                    references,
-                    used_fragments,
-                    renderer,
-                )
-            } else {
-                transform_inline_as_needed(
-                    &content,
-                    fragment_path,
-                    head_num,
-                    references,
-                    used_fragments,
-                    renderer,
-                )
+        .map(|tagged| match tagged {
+            Tagged::Keep(content) => Ok(content.as_str().to_owned()),
+            Tagged::Replace(content) => {
+                debug_assert_eq!(content.start_del.is_block(), content.end_del.is_block());
+                if content.start_del.is_block() {
+                    log::debug!("Found block");
+                    transform_block_as_needed(
+                        &content,
+                        fragment_path,
+                        head_num,
+                        references,
+                        used_fragments,
+                        renderer,
+                    )
+                } else {
+                    log::debug!("Found inline");
+                    transform_inline_as_needed(
+                        &content,
+                        fragment_path,
+                        head_num,
+                        references,
+                        used_fragments,
+                        renderer,
+                    )
+                }
             }
         })
         .collect::<Result<Vec<String>>>()?
@@ -302,16 +296,16 @@ pub fn replace_blocks(
 }
 
 fn transform_inline_as_needed<'a>(
-    dollarless: &Content<'a>,
+    content: &Content<'a>,
     fragment_path: impl AsRef<Path>,
     head_num: &str,
     references: &mut HashMap<String, String>,
     used_fragments: &mut Vec<PathBuf>,
     renderer: SupportedRenderer,
 ) -> Result<String> {
+    let dollarless = content.trimmed();
     let fragment_path = fragment_path.as_ref();
-    let lineno = dollarless.start.lineno;
-    let content = dollarless;
+    let lineno = dbg!(&content).start.lineno;
 
     let mut figures_counter = 0;
     let mut equations_counter = 0;
@@ -363,7 +357,7 @@ fn transform_inline_as_needed<'a>(
                     .map(|ref file| add_object(file, refer, None))
             }
 
-            ["equation"] | ["equ"] | _ => {
+            ["equation"] | ["equ"] => {
                 fragments::generate_replacement_file_from_template(fragment_path, &content, 1.6)
                     .map(|ref file| add_object(file, "", None))
             }
@@ -378,9 +372,9 @@ fn transform_inline_as_needed<'a>(
             }),
         }
     } else {
-        fragments::generate_replacement_file_from_template(fragment_path, &dollarless, 1.3).map(
+        fragments::generate_replacement_file_from_template(fragment_path, &content, 1.3).map(
             |replacement| {
-                let res = format_inline_equation(&replacement, renderer);
+                let res = format_equation(&replacement, renderer);
                 used_fragments.push(replacement.svg);
                 res
             },
@@ -388,17 +382,18 @@ fn transform_inline_as_needed<'a>(
     }
 }
 
-/// `s` is the content withou
+/// `dollarless` is the content WITH enclosing `$$` signs
 fn transform_block_as_needed<'a>(
-    dollarless: &Content<'a>,
+    content: &Content<'a>,
     fragment_path: impl AsRef<Path>,
-    head_num: &str,
+    _head_num: &str,
     references: &HashMap<String, String>,
     used_fragments: &mut Vec<PathBuf>,
     renderer: SupportedRenderer,
 ) -> Result<String> {
+    let dollarless = content.trimmed();
     let fragment_path = fragment_path.as_ref();
-    let lineno = dollarless.start.lineno;
+    let lineno = dbg!(&content).start.lineno;
     if let Some(stripped) = dollarless.strip_prefix("ref:") {
         let elms = stripped.split(':').collect::<Vec<&str>>();
         match &elms[..] {
@@ -439,9 +434,9 @@ fn transform_block_as_needed<'a>(
             }),
         }
     } else {
-        fragments::generate_replacement_file_from_template(fragment_path, &dollarless, 1.3).map(
+        fragments::generate_replacement_file_from_template(fragment_path, &content, 1.3).map(
             |replacement| {
-                let res = format_inline_equation(&replacement, renderer);
+                let res = format_equation(&replacement, renderer);
                 used_fragments.push(replacement.svg);
                 res
             },

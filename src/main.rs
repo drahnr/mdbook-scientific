@@ -24,7 +24,7 @@ enum Sub {
 }
 
 fn main() -> color_eyre::eyre::Result<()> {
-    eprintln!("INVOKE MDBOOK SCIENTIFIC!");
+    log::trace!("INVOKE MDBOOK SCIENTIFIC!");
     color_eyre::install()?;
 
     let args = Args::try_parse()?;
@@ -45,18 +45,16 @@ fn handle_preprocessing(pre: &dyn Preprocessor) -> Result<()> {
     let compiled_against = semver::VersionReq::parse(mdbook::MDBOOK_VERSION)?;
     let running_against = semver::Version::parse(ctx.mdbook_version.as_str())?;
     if !compiled_against.matches(&running_against) {
-        // We should probably use the `semver` crate to check compatibility
-        // here...
-        eprintln!(
-            "Warning: The {} plugin was built against version {} of mdbook, \
-             but we're being called from version {}",
+        log::warn!(
+            "The {} plugin was built against version {} of mdbook, \
+            but we're being called from version {}",
             pre.name(),
             mdbook::MDBOOK_VERSION,
             ctx.mdbook_version
         );
     }
 
-    let processed_book = dbg!(pre.run(&ctx, dbg!(book))?);
+    let processed_book = pre.run(&ctx, book)?;
 
     serde_json::to_writer(io::stdout(), &processed_book)?;
 
