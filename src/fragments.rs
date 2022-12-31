@@ -151,6 +151,7 @@ pub fn generate_replacement_file_from_template<'a>(
         content.end.column,
         content.s
     );
+    eprintln!("Using temporary helper file {}", path.display());
 
     let tex = content.as_ref();
     // create a new tex file containing the equation
@@ -264,7 +265,7 @@ pub fn parse_gnuplot_only<'a>(dest_path: &Path, content: &Content<'a>) -> Result
 
 /// Generate html from BibTeX file using `bib2xhtml`
 pub fn bib_to_html(source: &str, bib2xhtml: &str) -> Result<String> {
-    let source = fs::canonicalize(source).unwrap();
+    let source = fs::canonicalize(source)?;
     let bib2xhtml = Path::new(bib2xhtml);
 
     //./bib2xhtml.pl -s alpha -u -U ~/Documents/Bachelor_thesis/literature.bib

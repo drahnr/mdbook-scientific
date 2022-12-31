@@ -3,6 +3,7 @@ mod preprocess;
 
 use crate::errors::Error;
 use fs_err as fs;
+use mdbook::book::SectionNumber;
 use preprocess::replace_mermaid_charts;
 use std::collections::HashMap;
 use std::path::Path;
@@ -125,12 +126,15 @@ impl Scientific {
                 if let BookItem::Chapter(ref mut ch) = item {
                     ch.content = replace_mermaid_charts(
                         ch.content.as_str(),
-                        ch.number.as_ref().unwrap().to_string(),
+                        ch.number
+                            .as_ref()
+                            .unwrap_or(&SectionNumber::default())
+                            .to_string(),
                         &asset_path,
                         renderer,
                         &mut used_fragments,
                     )
-                    .unwrap();
+                    .expect("Replacing mermaid charts works for valid cmark. qed");
                 }
             });
 

@@ -173,4 +173,17 @@ $$"# =>
 1
 $$")
     );
+
+    test_sequester!(nope:
+    r####"# abc
+
+Hello, the block is a myth!
+        
+"#### =>
+    (K, 0..44, r####"# abc
+
+Hello, the block is a myth!
+        
+"####)
+    );
 }

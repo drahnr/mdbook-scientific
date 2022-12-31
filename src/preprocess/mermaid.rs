@@ -20,14 +20,14 @@ fn create_svg_from_mermaid(
 
     // FIXME make this simpler
     let code = code.to_owned();
-    let mut stdin = child.stdin.take().unwrap();
+    let mut stdin = child.stdin.take().expect("Has stdin. qed");
     let j = std::thread::spawn(move || {
         stdin.write(code.as_bytes())?;
         Ok::<_, crate::errors::Error>(())
     });
-    let mut stdout = child.stdout.unwrap();
-    let mut buf = String::with_capacity(8192);
-    stdout.read_to_string(&mut buf)?;
+    // let mut stdout = child.stdout.expect("Has stdout. qed");
+    // let mut buf = String::with_capacity(8192);
+    // stdout.read_to_string(&mut buf)?;
 
     j.join().unwrap()?;
 

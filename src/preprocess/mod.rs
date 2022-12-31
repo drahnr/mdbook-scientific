@@ -132,7 +132,9 @@ fn dollar_split_tags_iter<'a>(source: &'a str) -> impl Iterator<Item = SplitTagP
                 ));
 
                 if v.len() & 0x1 != 0 {
-                    let last = v.last().unwrap();
+                    let last = v
+                        .last()
+                        .expect("If length is uneven, last is `Some(_)`. qed");
                     eprintln!("Inserting $-sign at end of line #{lineno}!");
                     v.push(SplitTagPosition {
                         lico: LiCo {
