@@ -130,7 +130,6 @@ where
 {
     fn from(content: &'b Content<'a>) -> Self {
         debug_assert_eq!(content.start_del.as_str(), content.end_del.as_str());
-        dbg!(content);
 
         let dollarless = match content.start_del.as_str() {
             "$$" => {
@@ -187,8 +186,8 @@ where
                 let v: Vec<_> = annotate(content.s);
                 let iter = v.iter();
                 let mut iter = iter.skip(DELIM.len());
-                let start = dbg!(iter.next()).cloned().unwrap();
-                let mut iter = iter.rev().cloned();
+                let start = iter.next().cloned().unwrap();
+                let iter = iter.rev().cloned();
                 let last = v.last().cloned().unwrap_or_else(|| start.clone());
                 let second_to_last = iter.skip(1).next().unwrap_or_else(|| last.clone());
                 let end = (second_to_last.0, last.1);

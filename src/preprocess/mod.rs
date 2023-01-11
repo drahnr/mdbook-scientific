@@ -42,18 +42,13 @@ fn dollar_split_tags_iter<'a>(source: &'a str) -> impl Iterator<Item = SplitTagP
         })
         .enumerate()
         .scan(
-            0,
-            move |state, (lineno, (previous_char_cnt, current_char_cnt, line_content))| {
+            0_usize,
+            move |previous_byte_count, (lineno, (previous_line_char_count, current_char_cnt, line_content))| {
                 // handle block content
 
-                let byte_offset = *state;
-                *state += current_char_cnt + 1;
+                let byte_offset = dbg!(*previous_byte_count); // byte offset of the start of the line
+                *previous_byte_count += line_content.len() + "\n".len(); // update for the next iteration with the current line length plus newline
 
-                // the end of the previous line
-                let _previous = LiCo {
-                    lineno: lineno.saturating_sub(1),
-                    column: previous_char_cnt,
-                };
                 let mut current = LiCo { lineno, column: 1 };
 
                 // FIXME NOT OK, could also be further in
@@ -90,7 +85,7 @@ fn dollar_split_tags_iter<'a>(source: &'a str) -> impl Iterator<Item = SplitTagP
                                 Dollar::End(&line_content[..("$$".len())])
                             },
                             lico: current,
-                            byte_offset,
+                            byte_offset: byte_offset + 0,
                             // char_offset, // TODO
                         }]
                         .into_iter(),
@@ -101,7 +96,7 @@ fn dollar_split_tags_iter<'a>(source: &'a str) -> impl Iterator<Item = SplitTagP
                 let mut is_between_dollar_content = false;
 
                 // use to collect ranges
-                let mut v = Vec::from_iter(line_content.char_indices().enumerate().filter_map(
+                let mut tagswpos = Vec::from_iter(line_content.char_indices().enumerate().filter_map(
                     |(il_char_offset, (il_byte_offset, c))| {
                         match c {
                             '$' if !is_intra_inline_code => {
@@ -127,9 +122,9 @@ fn dollar_split_tags_iter<'a>(source: &'a str) -> impl Iterator<Item = SplitTagP
                     },
                 ));
 
-                if v.len() & 0x1 != 0 {
+                if tagswpos.len() & 0x1 != 0 {
                     log::warn!("Inserting $-sign at end of line #{lineno}!");
-                    v.push(SplitTagPosition {
+                    tagswpos.push(SplitTagPosition {
                         lico: LiCo {
                             lineno,
                             column: current_char_cnt + 1,
@@ -138,7 +133,7 @@ fn dollar_split_tags_iter<'a>(source: &'a str) -> impl Iterator<Item = SplitTagP
                         which: Dollar::End(""),
                     })
                 }
-                Some(v.into_iter())
+                Some(tagswpos.into_iter())
             },
         )
         .flatten()
@@ -182,8 +177,8 @@ fn iter_over_dollar_encompassed_blocks<'a>(
                 // content without the $ delimiters FIXME
                 s,
                 start: LiCo {
-                    lineno: 0,
-                    column: 0,
+                    lineno: 1,
+                    column: 1,
                 },
                 end: nxt.lico,
                 byte_range,
@@ -212,7 +207,7 @@ fn iter_over_dollar_encompassed_blocks<'a>(
             let replace = idx & 0x1 == 0;
             let byte_range = if replace {
                 // replace must _include_ the `$`-signs
-                start_byte_offset..(end_byte_offset + end_which.as_ref().len())
+                start_byte_offset..(end_byte_offset + end_which.as_ref().chars().count())
             } else {
                 // first character might not exist, so this was injected and hence
                 // would skip the first character
@@ -220,14 +215,14 @@ fn iter_over_dollar_encompassed_blocks<'a>(
                     0
                 } else {
                     {
-                        start_which.as_ref().len()
+                        start_which.as_ref().chars().count()
                     }
                 };
                 (start_byte_offset + skip_dollar)..end_byte_offset
             };
 
             // not within, so just return a string
-            let content = dbg!(Content {
+            let content = Content {
                 // content _including_ the $ delimiters
                 s: &source[byte_range.clone()],
                 start: start.lico,
@@ -236,8 +231,23 @@ fn iter_over_dollar_encompassed_blocks<'a>(
                 // delimiters
                 start_del: start.which,
                 end_del: end.which,
-            });
+            };
 
+            dbg!(&content);
+            if replace {
+                assert!(
+                    content.s.starts_with(content.start_del.as_str()),
+                    ">{}< should start with {}",
+                    content.s,
+                    content.start_del.as_str()
+                );
+                assert!(
+                    content.s.ends_with(content.end_del.as_str()),
+                    ">{}< should end with {}",
+                    content.s,
+                    content.end_del.as_str()
+                );
+            }
             if replace {
                 Tagged::Replace(content)
             } else {
@@ -305,7 +315,7 @@ fn transform_inline_as_needed<'a>(
 ) -> Result<String> {
     let dollarless = content.trimmed();
     let fragment_path = fragment_path.as_ref();
-    let lineno = dbg!(&content).start.lineno;
+    let lineno = content.start.lineno;
 
     let mut figures_counter = 0;
     let mut equations_counter = 0;
@@ -393,7 +403,8 @@ fn transform_block_as_needed<'a>(
 ) -> Result<String> {
     let dollarless = content.trimmed();
     let fragment_path = fragment_path.as_ref();
-    let lineno = dbg!(&content).start.lineno;
+    let lineno = content.start.lineno;
+
     if let Some(stripped) = dollarless.strip_prefix("ref:") {
         let elms = stripped.split(':').collect::<Vec<&str>>();
         match &elms[..] {

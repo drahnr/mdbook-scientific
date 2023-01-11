@@ -33,7 +33,6 @@ mod dollarsplit {
                         assert_eq!(s, soll.content);
                         // assert_eq!(LIT.match_indices(s).filter(|(offset, x)| offset == soll.byte_offset).count(), 1);
                     })
-
                 } else {
                     assert_matches!(ist.which, Dollar::End(s) => {
                         assert_eq!(ist.lico, soll.lico);
@@ -49,15 +48,19 @@ mod dollarsplit {
 }
 
     test_case!(bare:
-    r###"a b c"###
+    r###"a ’ c"###
     );
 
     test_case!(oneline:
-    r###"a $b$ c"### => (0,2, "$"), (0,4, "$")
+    r###"’ $b$ c"### => (0,2, "$"), (0,4, "$")
+    );
+
+    test_case!(nonascii_oneline:
+    r###" ’ℌ $b$"### => (0,4, "$"), (0,6, "$")
     );
 
     test_case!(oneline_unclosed:
-        r###"a $b c"### => (0,2,"$"), (0,7,"")
+        r###"’ $b c"### => (0,2,"$"), (0,7,"")
     );
 
     test_case!(dollar_block_1:
@@ -85,7 +88,7 @@ $ foo $ $$ $?
     );
 
     test_case!(
-        iter_over_empty_intra_line_sequences: "foo $$_$$ bar" => (0,4,"$"),(0,5,"$"),(0,7,"$"),(0,8,"$")
+        iter_over_empty_intra_line_sequences: "fo’ $$_$$ bar" => (0,4,"$"),(0,5,"$"),(0,7,"$"),(0,8,"$")
     );
 }
 
@@ -152,15 +155,15 @@ mod dollarless {
     test_dollarless!(boring_inline: r###"$xyz$"### => 1/2..1/4, "xyz", );
 
     test_dollarless!(block_w_params: r###"$$params,params,params
-foo
-$$"### => 2/1..2/4, r###"foo"###, "params,params,params");
+fo’
+$$"### => 2/1..2/4, r###"fo’"###, "params,params,params");
 
     test_dollarless!(empty_block: r###"$$
 $$"### => 2/1..2/1, r###""###);
 
-    test_dollarless!(boring_block: r###"$$
-hello charlie$
-$$"### => 2/1..2/15, r###"hello charlie$"###);
+    test_dollarless!(boring_block_w_nonascii: r###"$$
+hel℃⅌ charlie$
+$$"### => 2/1..2/15, r###"hel℃⅌ charlie$"###);
 }
 
 mod sequester {
@@ -199,7 +202,7 @@ mod sequester {
                         Tagged::Replace(_c) => { assert!(!soll.keep); }
                         Tagged::Keep(_c) => { assert!(soll.keep); }
                     }
-                    let content: &Content<'_> = ist.as_ref();
+                    let content: &Content<'_> = dbg!(ist.as_ref());
                     assert_eq!(&content.s[..], &soll.content[..]);
                     assert_eq!(&content.s[..], &LIT[soll.bytes.clone()]);
                 })
@@ -230,6 +233,12 @@ mod sequester {
 (K, 7..8, " "),
 (R, 8..11, "$3$"));
 
+    test_sequester!(nonascii_prefix:
+        "℃ $1234$" =>
+    (K, 0..4, "℃ "),
+    (R, 4..10, "$1234$")
+    );
+
     test_sequester!(oneblockje:
 r#"$$
 1
@@ -239,13 +248,13 @@ $$"# =>
 $$"#));
 
     test_sequester!(oneblockje_w_prefix:
-    r#"Hello, there is a block
+    r#"Hello’ there is a block
 $$
 1
 $$"# =>
-    (K, 0..24, r#"Hello, there is a block
+    (K, 0..26, r#"Hello’ there is a block
 "#),
-    (R, 24..31, "$$
+    (R, 26..33, "$$
 1
 $$")
     );
@@ -253,12 +262,12 @@ $$")
     test_sequester!(nope:
     r####"# abc
 
-Hello, the block is a myth!
+Hello’ the block is a myth!
         
 "#### =>
     (K, 0..44, r####"# abc
 
-Hello, the block is a myth!
+Hello’ the block is a myth!
         
 "####)
     );
