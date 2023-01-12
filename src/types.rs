@@ -82,7 +82,7 @@ pub struct Content<'a> {
 impl<'a> Content<'a> {
     /// Strips dollars and any prefix signs
     pub fn trimmed(&self) -> Trimmed<'a> {
-        dbg!(Trimmed::from(self))
+        Trimmed::from(self)
     }
 
     pub fn as_str(&self) -> &'a str {
@@ -140,14 +140,13 @@ where
 
                 let v: Vec<_> = annotate(content.s);
 
-                let start = dbg!(v.iter().find(|&&(_, _, c)| c == '\n'))
-                    .cloned()
-                    .unwrap();
+                let start = v.iter().find(|&&(_, _, c)| c == '\n').cloned().unwrap();
                 // in case there is only one newline enclosed between `$$\n$$`, use the start newline
                 let mut iter = v.iter();
                 // we need the byte offset after, but the LiCo to be the one before, since it's inclusive
-                let end = if let Some(one_after) = dbg!(iter.rfind(|&&(_, _, c)| c == '\n')) {
-                    let mut end = dbg!(iter.next_back())
+                let end = if let Some(one_after) = iter.rfind(|&&(_, _, c)| c == '\n') {
+                    let mut end = iter
+                        .next_back()
                         .cloned()
                         .unwrap_or_else(|| one_after.clone());
                     end.1 = one_after.1;
@@ -159,9 +158,6 @@ where
                 } else {
                     start.clone()
                 };
-                dbg!((&start, &end));
-
-                // FIXME currently end is _excluding_ but it really should be including
 
                 let first_line = &content.s[..start.1];
                 assert_eq!(&first_line[..(DELIM.len())], DELIM);

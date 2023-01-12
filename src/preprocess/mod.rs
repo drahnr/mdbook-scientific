@@ -46,7 +46,7 @@ fn dollar_split_tags_iter<'a>(source: &'a str) -> impl Iterator<Item = SplitTagP
             move |previous_byte_count, (lineno, (previous_line_char_count, current_char_cnt, line_content))| {
                 // handle block content
 
-                let byte_offset = dbg!(*previous_byte_count); // byte offset of the start of the line
+                let byte_offset = *previous_byte_count; // byte offset of the start of the line
                 *previous_byte_count += line_content.len() + "\n".len(); // update for the next iteration with the current line length plus newline
 
                 let mut current = LiCo { lineno, column: 1 };
@@ -233,7 +233,6 @@ fn iter_over_dollar_encompassed_blocks<'a>(
                 end_del: end.which,
             };
 
-            dbg!(&content);
             if replace {
                 assert!(
                     content.s.starts_with(content.start_del.as_str()),
@@ -260,13 +259,15 @@ fn iter_over_dollar_encompassed_blocks<'a>(
 
 pub fn replace_blocks(
     fragment_path: impl AsRef<Path>,
-    asset_path: impl AsRef<Path>,
     source: &str,
-    head_num: &str,
+    chapter_number: &str,
+    chapter_name: &str,
+    chapter_path: impl AsRef<Path>,
     renderer: SupportedRenderer,
     used_fragments: &mut Vec<PathBuf>,
     references: &mut HashMap<String, String>,
 ) -> Result<String> {
+    let chapter_path = chapter_path.as_ref();
     let fragment_path = fragment_path.as_ref();
     fs::create_dir_all(fragment_path)?;
 
@@ -281,7 +282,9 @@ pub fn replace_blocks(
                     transform_block_as_needed(
                         &content,
                         fragment_path,
-                        head_num,
+                        &chapter_number,
+                        &chapter_name,
+                        &chapter_path,
                         references,
                         used_fragments,
                         renderer,
@@ -291,7 +294,9 @@ pub fn replace_blocks(
                     transform_inline_as_needed(
                         &content,
                         fragment_path,
-                        head_num,
+                        chapter_number,
+                        chapter_name,
+                        chapter_path,
                         references,
                         used_fragments,
                         renderer,
@@ -305,10 +310,12 @@ pub fn replace_blocks(
     Ok(s)
 }
 
-fn transform_inline_as_needed<'a>(
+fn transform_block_as_needed<'a>(
     content: &Content<'a>,
     fragment_path: impl AsRef<Path>,
-    head_num: &str,
+    chapter_number: &str,
+    chapter_name: &str,
+    chapter_path: impl AsRef<Path>,
     references: &mut HashMap<String, String>,
     used_fragments: &mut Vec<PathBuf>,
     renderer: SupportedRenderer,
@@ -320,83 +327,107 @@ fn transform_inline_as_needed<'a>(
     let mut figures_counter = 0;
     let mut equations_counter = 0;
 
-    if let Some(stripped) = dollarless.strip_prefix("ref:") {
-        let mut add_object =
-            move |replacement: &Replacement<'_>, refer: &str, title: Option<&str>| -> String {
-                let file = replacement.svg.as_path();
-                used_fragments.push(file.to_owned());
+    let mut add_object =
+        move |replacement: &Replacement<'_>, refer: &str, title: Option<&str>| -> String {
+            let file = replacement.svg.as_path();
+            used_fragments.push(file.to_owned());
 
-                if let Some(title) = title {
-                    figures_counter += 1;
-                    references.insert(
-                        refer.to_string(),
-                        format!("Figure {}{}", head_num, figures_counter),
-                    );
+            if let Some(title) = title {
+                figures_counter += 1;
+                references.insert(
+                    refer.to_string(),
+                    format!("Figure {}{}", chapter_number, figures_counter),
+                );
 
-                    format_figure(
-                        replacement,
-                        refer,
-                        head_num,
-                        figures_counter,
-                        title,
-                        renderer,
-                    )
-                } else if !refer.is_empty() {
-                    equations_counter += 1;
-                    references.insert(
-                        refer.to_string(),
-                        format!("{}{}", head_num, equations_counter),
-                    );
-                    format_equation_block(replacement, refer, head_num, equations_counter, renderer)
-                } else {
-                    format_equation(replacement, renderer)
-                }
-            };
-
-        let elms = stripped.split(':').collect::<Vec<&str>>();
-        match &elms[..] {
-            ["latex", refer, title] => fragments::parse_latex(fragment_path, &content)
-                .map(|ref file| add_object(file, refer, Some(title))),
-            ["gnuplot", refer, title] => fragments::parse_gnuplot(fragment_path, &content)
-                .map(|ref file| add_object(file, refer, Some(title))),
-            ["gnuplotonly", refer, title] => fragments::parse_gnuplot_only(fragment_path, &content)
-                .map(|ref file| add_object(file, refer, Some(title))),
-
-            ["equation", refer] | ["equ", refer] => {
-                fragments::generate_replacement_file_from_template(fragment_path, &content, 1.6)
-                    .map(|ref file| add_object(file, refer, None))
+                format_figure(
+                    replacement,
+                    refer,
+                    &chapter_number,
+                    figures_counter,
+                    title,
+                    renderer,
+                )
+            } else if !refer.is_empty() {
+                equations_counter += 1;
+                references.insert(
+                    refer.to_string(),
+                    format!("{}{}", chapter_number, equations_counter),
+                );
+                format_equation_block(
+                    replacement,
+                    refer,
+                    &chapter_number,
+                    equations_counter,
+                    renderer,
+                )
+            } else {
+                format_equation_block(
+                    replacement,
+                    refer,
+                    &chapter_number,
+                    equations_counter,
+                    renderer,
+                )
             }
+        };
 
-            ["equation"] | ["equ"] => {
-                fragments::generate_replacement_file_from_template(fragment_path, &content, 1.6)
-                    .map(|ref file| add_object(file, "", None))
-            }
+    let params = Vec::from_iter(
+        dollarless
+            .parameters
+            .as_ref()
+            .map(|&s| s.splitn(3, ',').map(|s| s.trim()))
+            .into_iter()
+            .flatten(),
+    );
 
-            [kind, _] => Err(Error::UnknownReferenceKind {
-                kind: kind.to_owned().to_owned(),
-                lineno,
-            }),
-            _ => Err(Error::UnexpectedReferenceArgCount {
-                count: elms.len(),
-                lineno,
-            }),
-        }
-    } else {
-        fragments::generate_replacement_file_from_template(fragment_path, &content, 1.3).map(
-            |replacement| {
-                let res = format_equation(&replacement, renderer);
-                used_fragments.push(replacement.svg);
-                res
-            },
-        )
-    }
+    let (msg, replacement) = match &params[..] {
+        ["latex", refer, title] => (
+            "🌋 tex",
+            fragments::parse_latex(fragment_path, &content)
+                .map(|ref file| add_object(file, refer, Some(title))),
+        ),
+        ["gnuplot", refer, title] => (
+            "📈 figure",
+            fragments::parse_gnuplot(fragment_path, &content)
+                .map(|ref file| add_object(file, refer, Some(title))),
+        ),
+        ["gnuplotonly", refer, title] => (
+            "📈 figure",
+            fragments::parse_gnuplot_only(fragment_path, &content)
+                .map(|ref file| add_object(file, refer, Some(title))),
+        ),
+
+        ["equation", refer] | ["equ", refer] => (
+            "🧮 equation",
+            fragments::generate_replacement_file_from_template(fragment_path, &content, 1.6)
+                .map(|ref file| add_object(file, refer, None)),
+        ),
+
+        ["equation"] | ["equ"] | _ => (
+            "🧮 equation",
+            fragments::generate_replacement_file_from_template(fragment_path, &content, 1.6)
+                .map(|ref file| add_object(file, "", None)),
+        ),
+    };
+
+    let mut iter = msg.chars();
+    let emoji = iter.next().unwrap();
+    let msg = String::from_iter(iter.skip(1));
+    log::info!("{} Found block {}", emoji, msg);
+    replacement
 }
 
-/// `dollarless` is the content WITH enclosing `$$` signs
-fn transform_block_as_needed<'a>(
+/// Transform an inline equation such as
+/// ```text
+/// Hello sir, I am an equation $a_b(x) = b \times x$ which should render inline!
+/// ```
+/// Can also be used to reference block equations via `$ref:hello$` where `hello` 'd be the block equation name.
+fn transform_inline_as_needed<'a>(
     content: &Content<'a>,
     fragment_path: impl AsRef<Path>,
-    _head_num: &str,
+    chapter_number: &str,
+    chapter_name: &str,
+    chapter_path: impl AsRef<Path>,
     references: &HashMap<String, String>,
     used_fragments: &mut Vec<PathBuf>,
     renderer: SupportedRenderer,
@@ -407,47 +438,64 @@ fn transform_block_as_needed<'a>(
 
     if let Some(stripped) = dollarless.strip_prefix("ref:") {
         let elms = stripped.split(':').collect::<Vec<&str>>();
-        match &elms[..] {
-            ["fig", refere] => references
-                .get::<str>(refere)
-                .ok_or(Error::InvalidReference {
-                    to: elms[1].to_owned(),
+        let (msg, replacement) = match &elms[..] {
+            ["fig", refere] => (
+                "📈 figure",
+                references
+                    .get::<str>(refere)
+                    .ok_or(Error::InvalidReference {
+                        to: elms[1].to_owned(),
+                        lineno,
+                    })
+                    .map(|x| format!(r#"<a class="fig_ref" href='#{}'>{}</a>"#, elms[1], x)),
+            ),
+            ["bib", refere] => (
+                "📚 bibliography",
+                references
+                    .get::<str>(refere)
+                    .ok_or(Error::InvalidReference {
+                        to: elms[1].to_owned(),
+                        lineno,
+                    })
+                    .map(|x| {
+                        format!(
+                            r#"<a class="bib_ref" href='bibliography.html#{}'>{}</a>"#,
+                            elms[1], x
+                        )
+                    }),
+            ),
+            ["equ", refere] => (
+                "🧮 equation",
+                references
+                    .get::<str>(refere)
+                    .ok_or(Error::InvalidReference {
+                        to: elms[1].to_owned(),
+                        lineno,
+                    })
+                    .map(|x| format!(r#"<a class="equ_ref" href='#{}'>Eq. ({})</a>"#, elms[1], x)),
+            ),
+            [kind, _] => {
+                return Err(Error::UnknownReferenceKind {
+                    kind: kind.to_owned().to_owned(),
                     lineno,
                 })
-                .map(|x| format!(r#"<a class="fig_ref" href='#{}'>{}</a>"#, elms[1], x)),
-            ["bib", refere] => references
-                .get::<str>(refere)
-                .ok_or(Error::InvalidReference {
-                    to: elms[1].to_owned(),
+            }
+            _ => {
+                return Err(Error::UnexpectedReferenceArgCount {
+                    count: elms.len(),
                     lineno,
                 })
-                .map(|x| {
-                    format!(
-                        r#"<a class="bib_ref" href='bibliography.html#{}'>{}</a>"#,
-                        elms[1], x
-                    )
-                }),
-            ["equ", refere] => references
-                .get::<str>(refere)
-                .ok_or(Error::InvalidReference {
-                    to: elms[1].to_owned(),
-                    lineno,
-                })
-                .map(|x| format!(r#"<a class="equ_ref" href='#{}'>Eq. ({})</a>"#, elms[1], x)),
-
-            [kind, _] => Err(Error::UnknownReferenceKind {
-                kind: kind.to_owned().to_owned(),
-                lineno,
-            }),
-            _ => Err(Error::UnexpectedReferenceArgCount {
-                count: elms.len(),
-                lineno,
-            }),
-        }
+            }
+        };
+        let mut iter = msg.chars();
+        let emoji = iter.next().unwrap();
+        let msg = String::from_iter(iter.skip(1));
+        log::info!("{} Found inline {}", emoji, msg);
+        replacement
     } else {
         fragments::generate_replacement_file_from_template(fragment_path, &content, 1.3).map(
             |replacement| {
-                let res = format_equation(&replacement, renderer);
+                let res = format_equation_inline(&replacement, renderer);
                 used_fragments.push(replacement.svg);
                 res
             },

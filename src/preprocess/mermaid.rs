@@ -1,19 +1,50 @@
+use crate::fragments::hash;
+
 use super::*;
 
-fn create_svg_from_mermaid(
+fn create_object_from_mermaid(
     code: &str,
-    dest: impl AsRef<Path>,
-    chapterno: &str,
+    fragment_path: impl AsRef<Path>,
+    chapter_number: &str,
     counter: usize,
 ) -> Result<PathBuf> {
     let mmdc = which::which("mmdc")?;
-    let dest = dest.as_ref();
+    let fragment_path = fragment_path.as_ref();
 
-    let dest = dest.join(format!("mermaid_{}_{}.svg", chapterno, counter));
+    // FIXME should be SVG, but the ouput produces the following issue with cmark2svg
+    // Message:  called `Result::unwrap()` on an `Err` value: Svg(ParsingFailed(NoRootNode))
+    // Location: projects/cmark2tex/src/lib.rs:275
+
+    // Make it unique by content hash
+    let code_hash = hash(code);
+    let code_hash = &code_hash.as_str()[0..10];
+
+    const FILEFMT: &str = "pdf";
+    let filename = PathBuf::from(format!(
+        "mermaid_{}_{}__{}.{}",
+        chapter_number.replace('.', "_"),
+        counter,
+        code_hash,
+        FILEFMT
+    ));
+    let dest = fragment_path.join(&filename);
+
+    // only use dest for actually file usage, but only ref by filename, we are in `src` when it's going to be rendered
+    if dest.exists() {
+        log::debug!(
+            "Mermaid file already present, unique by hash {}",
+            dest.display()
+        );
+        return Ok(filename);
+    }
+
+    log::debug!("Generating mermaid replacement file {}", dest.display());
 
     let mut child = std::process::Command::new(mmdc)
-        .arg("--outputFormat=svg")
+        .arg(format!("--outputFormat={}", FILEFMT))
         .arg(format!("--output={}", dest.display()))
+        .arg("--width=700")
+        .arg("--height=700")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .spawn()?;
@@ -31,7 +62,12 @@ fn create_svg_from_mermaid(
 
     j.join().unwrap()?;
 
-    Ok(dest)
+    let status = child.wait()?;
+    if status.success() {
+        Ok(filename)
+    } else {
+        Err(Error::MermaidSubprocess(status))
+    }
 }
 
 /// Replaces the content of the cmark file where codeblocks tagged with `mermaid`
@@ -39,20 +75,21 @@ fn create_svg_from_mermaid(
 ///
 pub fn replace_mermaid_charts(
     source: &str,
-    chapterno: String,
-    dest: impl AsRef<Path>,
+    chapter_number: &str,
+    chapter_name: &str,
+    chapter_path: impl AsRef<Path>,
+    fragment_path: impl AsRef<Path>,
     renderer: SupportedRenderer,
     used_fragments: &mut Vec<PathBuf>,
 ) -> Result<String> {
+    let chapter_path = chapter_path.as_ref();
     match renderer {
         // html can just fine deal with it
         SupportedRenderer::Html => return Ok(source.to_owned()),
-        _ => {
-            log::info!("Replacing mermaid graph in file {}", "where???");
-        }
+        _ => {}
     }
 
-    let dest = dest.as_ref();
+    let fragment_path = fragment_path.as_ref();
 
     use pulldown_cmark::*;
 
@@ -86,26 +123,36 @@ pub fn replace_mermaid_charts(
 
             Event::Text(ref code) | Event::Code(ref code) => {
                 if state.is_mermaid_block {
-                    let svg_path = create_svg_from_mermaid(
+                    let image_path = create_object_from_mermaid(
                         code.as_ref(),
-                        dest,
-                        chapterno.as_str(),
+                        fragment_path,
+                        chapter_number,
                         state.counter,
                     )?;
-                    used_fragments.push(svg_path.clone());
+                    used_fragments.push(image_path.clone());
 
-                    let desc: CowStr =
-                        format!("Chapter {}, Graphic {}", chapterno.as_str(), state.counter).into();
+                    log::info!(
+                        "🧜 Replacing mermaid graph #{} in chapter \"{} - {}\" in file {} with pdf {}",
+                        state.counter,
+                        chapter_number, chapter_name, chapter_path.display(),
+                        image_path.display()
+                    );
+
+                    let desc = CowStr::from(format!(
+                        "Chapter {}, Graphic {}",
+                        chapter_number, state.counter
+                    ));
                     let title = desc.clone();
                     let inject = Tag::Image(
                         LinkType::Inline,
-                        svg_path.display().to_string().into(),
+                        image_path.display().to_string().into(),
                         title,
                     );
 
                     events.push(Event::Start(inject.clone()));
                     events.push(Event::Text(desc));
                     events.push(Event::End(inject));
+                    events.push(Event::Text(CowStr::Borrowed("\n")));
                     continue;
                 }
             }
@@ -138,6 +185,8 @@ graph
 ```
 "#,
             "1.2.3".into(),
+            "testchap".into(),
+            PathBuf::new(),
             dest,
             SupportedRenderer::Markdown,
             &mut Vec::new(),

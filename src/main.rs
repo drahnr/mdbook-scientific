@@ -24,8 +24,17 @@ enum Sub {
 }
 
 fn main() -> color_eyre::eyre::Result<()> {
-    log::trace!("INVOKE MDBOOK SCIENTIFIC!");
     color_eyre::install()?;
+
+    use env_logger::Builder;
+    use log::LevelFilter;
+    let mut builder = Builder::from_default_env();
+    builder.filter(None, LevelFilter::Debug).init();
+
+    log::debug!(
+        "mdbook-scientific called from {}!",
+        std::env::current_dir().unwrap().display()
+    );
 
     let args = Args::try_parse()?;
 

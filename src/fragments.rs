@@ -142,7 +142,7 @@ pub fn generate_replacement_file_from_template<'a>(
     let name = hash(content.as_str());
     let path = dest_path.join(&name);
 
-    log::debug!(
+    log::info!(
         r#"Found equation from {}:{}..{}:{}:
     {}"#,
         content.start.lineno,
@@ -151,7 +151,7 @@ pub fn generate_replacement_file_from_template<'a>(
         content.end.column,
         content.s
     );
-    eprintln!(
+    log::debug!(
         "Using temporary helper file {}",
         path.with_extension("tex").display()
     );

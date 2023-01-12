@@ -54,12 +54,6 @@ impl Preprocessor for Scientific {
 
 impl Scientific {
     fn run_inner(&self, ctx: &PreprocessorContext, mut book: Book) -> Result<Book> {
-        use env_logger::Builder;
-        use log::LevelFilter;
-        let mut builder = Builder::from_default_env();
-
-        builder.filter(None, LevelFilter::Debug).init();
-
         if let Some(cfg) = ctx.config.get_preprocessor(self.name()) {
             let renderer = SupportedRenderer::from_str(ctx.renderer.as_str())?;
 
@@ -121,13 +115,6 @@ impl Scientific {
                 }
             }
 
-            // assets path
-            let asset_path = cfg
-                .get("assets")
-                .map(|x| x.as_str().expect("Assumes valid UTF8 for assets. qed"))
-                .unwrap_or("src/");
-            let asset_path = ctx.root.join(asset_path);
-
             // replace mermaid charts with prerendered svgs
             book.for_each_mut(|item| {
                 if let BookItem::Chapter(ref mut ch) = item {
@@ -147,13 +134,17 @@ impl Scientific {
                             .unwrap_or_else(|| { "?".to_owned() })
                     );
 
+                    let chapter_number = ch
+                        .number
+                        .as_ref()
+                        .unwrap_or(&SectionNumber::default())
+                        .to_string();
                     ch.content = replace_mermaid_charts(
                         ch.content.as_str(),
-                        ch.number
-                            .as_ref()
-                            .unwrap_or(&SectionNumber::default())
-                            .to_string(),
-                        &asset_path,
+                        &chapter_number,
+                        &ch.name,
+                        ch.path.as_ref().unwrap_or(&PathBuf::new()),
+                        &fragment_path,
                         renderer,
                         &mut used_fragments,
                     )
@@ -168,17 +159,20 @@ impl Scientific {
                 }
 
                 if let BookItem::Chapter(ref mut ch) = item {
-                    let head_number = ch
+                    let chapter_number = ch
                         .number
                         .as_ref()
                         .map(|x| x.to_string())
                         .unwrap_or_default();
+                    let chapter_path = ch.path.as_ref().cloned().unwrap_or_else(|| PathBuf::new());
+                    let chapter_name = ch.name.clone();
 
                     match replace_blocks(
                         &fragment_path,
-                        &asset_path,
                         &ch.content,
-                        &head_number,
+                        &chapter_number,
+                        &chapter_name,
+                        chapter_path.as_path(),
                         renderer,
                         &mut used_fragments,
                         &mut references,
@@ -203,14 +197,31 @@ impl Scientific {
             error?;
 
             // the output path is `src/storage/assets`, which get copied to the output directory
-            let dest = ctx.root.join("src").join("storage").join("assets");
+            let asset_path = cfg
+                .get("assets")
+                .map(|x| x.as_str().expect("Assumes valid UTF8 for assets. qed"))
+                .unwrap_or("src/");
+            let dest = ctx.root.join(asset_path);
+
             if !dest.exists() {
                 fs::create_dir_all(&dest)?;
             }
 
+            let dest = fs::canonicalize(dest)?;
+
             // copy all used fragments
-            for fragment in used_fragments {
-                fs::copy(fragment_path.join(&fragment), dest.join(&fragment))?;
+            if fragment_path != dest {
+                for fragment in used_fragments {
+                    let from = fragment_path.join(&fragment);
+                    let to = dest.join(&fragment);
+                    log::info!("Copying {} -> {}", from.display(), to.display());
+                    fs::copy(from, to)?;
+                }
+            } else {
+                log::debug!(
+                    "Fragments already in the right place, copying nothing {}",
+                    fragment_path.display()
+                )
             }
 
             Ok(book)

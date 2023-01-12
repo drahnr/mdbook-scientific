@@ -61,4 +61,7 @@ pub enum Error {
 
     #[error(transparent)]
     Which(#[from] which::Error),
+
+    #[error("mmdc mermaid cli client terminated with {0:?}")]
+    MermaidSubprocess(std::process::ExitStatus),
 }
